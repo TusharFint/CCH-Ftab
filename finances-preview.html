@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Finances Module - Excel-Like UI Preview</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; }
+  input[type=number]::-webkit-inner-spin-button { opacity: 1; }
+  .custom-scrollbar::-webkit-scrollbar { height: 10px; width: 10px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #a1a1a1; }
+  .sticky-left { position: sticky; left: 0; z-index: 20; box-shadow: 4px 0 4px -2px rgba(0,0,0,0.05); }
+  .sticky-head { position: sticky; left: 0; top: 0; z-index: 60; }
+  .sticky-top-th { position: sticky; top: 0; z-index: 40; }
+  .sticky-top-right-th { position: sticky; top: 0; right: 0; z-index: 50; }
+  input.cell-input { width:100%; padding:6px 4px; text-align:center; font-size:13px; font-weight:500;
+    border:1px solid transparent; border-radius:4px; background:transparent; outline:none;
+    transition:all 0.15s; }
+  input.cell-input:hover { border-color:#d1d5db; }
+  input.cell-input:focus { border-color:#2E8F45; box-shadow:0 0 0 2px rgba(46,143,69,0.15); background:white; }
+  #errDisplay { position:fixed; bottom:10px; right:10px; z-index:9999; background:red; color:white; padding:8px 12px; border-radius:8px; font-size:12px; max-width:400px; display:none; }
+</style>
+</head>
+<body class="bg-[#FAF7F3] text-[#4A4A4A] min-h-screen">
+
+<div id="app"></div>
+
+<div id="errDisplay"></div>
+
+<script>
+// ---- ALL 25 REAL CLIENTS FROM mockData.ts ----
+var ALL_SITES = [
+  { id:'c1', name:'W-F 09TH' },{ id:'c2', name:'W-F 10TH' },{ id:'c3', name:"LOWE'S" },
+  { id:'c4', name:'GLOBAL' },{ id:'c5', name:'MARELLI' },{ id:'c6', name:'MARELLI-2' },
+  { id:'c7', name:'NEWROLIC' },{ id:'c8', name:'WEB-TECH' },{ id:'c9', name:'SECURONIX' },
+  { id:'c10', name:'ASTRA' },{ id:'c11', name:'D3' },{ id:'c12', name:'ALL STATE' },
+  { id:'c13', name:'ZSCALER' },{ id:'c14', name:'DC-OFFICE' },{ id:'c15', name:'PSN' },
+  { id:'c16', name:'ECOSPACE' },{ id:'c17', name:'INFINITY' },{ id:'c18', name:'CENTRUM' },
+  { id:'c19', name:'WE-WORK' },{ id:'c20', name:'LAUREL A' },{ id:'c21', name:'LAUREL D' },
+  { id:'c22', name:'OLYMPIA' },{ id:'c23', name:'RIPPLINGS' },{ id:'c24', name:'MU SIGMA' },{ id:'c25', name:'IKEA' }
+];
+
+var SITES = ALL_SITES.slice();
+
+var DEFAULTS = {
+  revenue_per_plate:0, packs_per_day:0,
+  manpower_count:0, rate_per_manpower:0, manpower_days:30, num_sites:1,
+  transport_cost_per_km:0, transport_kms:0,
+  on_site_gas_cost:0, admin_percent:0.3,
+  capex_amount:0, commission_percent:0,
+  procurement_discount:0, aggregator_commission:0,
+  consumables_percent:0.10, food_waste_percent:1.0,
+  fuel_percent:4.0, electricity_percent:0.34, water_percent:0.34,
+  food_cost:0
+};
+
+var gridState = {};
+for (var i = 0; i < SITES.length; i++) {
+  gridState[SITES[i].id] = Object.assign({}, DEFAULTS);
+}
+
+// ---- Row definitions ----
+var INPUT_ROWS = [
+  { section:'A. REVENUE', sectionClass:'bg-green-50 border-green-200 text-green-900', type:'header' },
+  { key:'revenue_per_plate', label:'Revenue per Plate (\u20B9)', section:'revenue', type:'input', step:'any' },
+  { key:'packs_per_day', label:'Packs per Day', section:'revenue', type:'input', step:'any' },
+  { key:'_food_sales', label:'\u21B3 Food Sales (Calc)', section:'revenue', type:'calc' },
+
+  { section:'B. COSTS', sectionClass:'bg-amber-50 border-amber-200 text-amber-900', type:'header' },
+  { key:'manpower_count', label:'Manpower Count', section:'costs', type:'input', step:'any' },
+  { key:'rate_per_manpower', label:'Rate/Manpower (\u20B9)', section:'costs', type:'input', step:'any' },
+  { key:'manpower_days', label:'Days', section:'costs', type:'input', step:'any' },
+  { key:'num_sites', label:'# Sites', section:'costs', type:'input', step:'any' },
+  { key:'transport_cost_per_km', label:'Transport Cost/km (\u20B9)', section:'costs', type:'input', step:'any' },
+  { key:'transport_kms', label:'Kilometers', section:'costs', type:'input', step:'any' },
+  { key:'on_site_gas_cost', label:'On-Site Gas (\u20B9)', section:'costs', type:'input', step:'any' },
+  { key:'admin_percent', label:'Admin (% of sales)', section:'costs', type:'input', step:'0.01' },
+  { key:'capex_amount', label:'Capex Amount (\u20B9)', section:'costs', type:'input', step:'any' },
+  { key:'commission_percent', label:'Commission (% gross)', section:'costs', type:'input', step:'0.01' },
+  { key:'procurement_discount', label:'Procurement Discount (\u20B9)', section:'costs', type:'input', step:'any' },
+  { key:'aggregator_commission', label:'Aggregator Comm. (\u20B9)', section:'costs', type:'input', step:'any' },
+
+  { section:'Direct Cost Inputs (% of sales)', sectionClass:'bg-blue-50 border-blue-200 text-blue-900', type:'header' },
+  { key:'consumables_percent', label:'Consumables & Chemicals (%)', section:'costs', type:'input', step:'0.01' },
+  { key:'food_waste_percent', label:'Food Waste (%)', section:'costs', type:'input', step:'0.01' },
+  { key:'fuel_percent', label:'Fuel Cost (%)', section:'costs', type:'input', step:'0.01' },
+  { key:'electricity_percent', label:'Electricity (%)', section:'costs', type:'input', step:'0.01' },
+  { key:'water_percent', label:'Water (%)', section:'costs', type:'input', step:'0.01' },
+  { key:'food_cost', label:'Food Cost (\u20B9, As per MIS)', section:'costs', type:'input', step:'any' },
+
+  { section:'Calculated Costs', sectionClass:'bg-slate-100 border-slate-300 text-slate-800', type:'header' },
+  { key:'_wages', label:'\u21B3 Wages/Manpower', section:'costs', type:'calc' },
+  { key:'_consumables', label:'\u21B3 Consumables & Chemicals', section:'costs', type:'calc' },
+  { key:'_food_waste', label:'\u21B3 Food Waste', section:'costs', type:'calc' },
+  { key:'_fuel', label:'\u21B3 Fuel Cost', section:'costs', type:'calc' },
+  { key:'_electricity', label:'\u21B3 Electricity', section:'costs', type:'calc' },
+  { key:'_water', label:'\u21B3 Water', section:'costs', type:'calc' },
+  { key:'_food_cost', label:'\u21B3 Food Cost', section:'costs', type:'calc' },
+  { key:'_transportation', label:'\u21B3 Transportation', section:'costs', type:'calc' },
+  { key:'_gas', label:'\u21B3 On-Site Gas', section:'costs', type:'calc' },
+  { key:'_admin', label:'\u21B3 Administrative', section:'costs', type:'calc' },
+  { key:'_capex', label:'\u21B3 Capex/Site', section:'costs', type:'calc' },
+  { key:'_commission_calc', label:'\u21B3 Commission', section:'costs', type:'calc' },
+  { key:'_total_cost', label:'\u21B3 TOTAL COST', section:'costs', type:'total' },
+
+  { section:'D. RESULTS', sectionClass:'bg-slate-100 border-slate-300 text-slate-800', type:'header' },
+  { key:'_net_profit', label:'Net Profit / (Loss)', section:'results', type:'profit' },
+  { key:'_net_pct', label:'Net Profit/Loss %', section:'results', type:'pct' },
+  { key:'_agg_comm', label:'Aggregator Commission', section:'results', type:'plain' },
+  { key:'_final_profit', label:'Final Profit / Loss', section:'results', type:'profit' },
+  { key:'_final_pct', label:'Final Profit/Loss %', section:'results', type:'pct' }
+];
+
+var PNL_ROWS = [
+  { section:'REVENUE', sectionClass:'bg-green-50 border-green-200 text-green-900', type:'header' },
+  { key:'food_sales', label:'Food Sales', isMoney:true },
+
+  { section:'DIRECT COSTS (A)', sectionClass:'bg-amber-50 border-amber-200 text-amber-900', type:'header' },
+  { key:'wages_manpower', label:'Wages / Manpower Cost', isMoney:true },
+  { key:'consumables', label:'Consumables & Chemicals', isMoney:true },
+  { key:'food_waste', label:'Food Waste', isMoney:true },
+  { key:'fuel', label:'Fuel Cost', isMoney:true },
+  { key:'electricity', label:'Electricity', isMoney:true },
+  { key:'water', label:'Water', isMoney:true },
+  { key:'food_cost', label:'Food Cost', isMoney:true },
+  { key:'transportation', label:'Transportation Cost \u2013 Vehicle', isMoney:true },
+  { key:'on_site_gas', label:'On-Site Gas', isMoney:true },
+
+  { section:'INDIRECT COSTS (B)', sectionClass:'bg-amber-50 border-amber-200 text-amber-900', type:'header' },
+  { key:'administrative', label:'Administrative', isMoney:true },
+  { key:'commission', label:'Commission', isMoney:true },
+  { key:'capex_per_site', label:'Capex \u2013 Pots, Pans, Carriers etc.', isMoney:true },
+
+  { section:'SUMMARY & DERIVED METRICS', sectionClass:'bg-slate-100 border-slate-300 text-slate-800', type:'header' },
+  { key:'total_cost', label:'Total Cost (A + B + Capex)', isMoney:true, highlight:'amber' },
+  { key:'procurement_discount', label:'Procurement Discount', isMoney:true, isFromInput:true },
+  { key:'net_profit_loss', label:'Net Profit / (Loss)', isProfit:true },
+  { key:'net_profit_loss_pct', label:'Net Profit / Loss %', isPct:true, isProfit:true },
+  { key:'aggregator_commission_total', label:'Aggregator commission if any', isMoney:true, isFromInput:true },
+  { key:'final_profit_loss', label:'Final Profit / Loss', isProfit:true },
+  { key:'final_profit_loss_pct', label:'Final Profit / Loss %', isPct:true, isProfit:true }
+];
+
+function computeDerived(i) {
+  var fs = i.revenue_per_plate * i.packs_per_day;
+  var wm = i.num_sites > 0 ? (i.manpower_count * i.rate_per_manpower * i.manpower_days) / i.num_sites : 0;
+  var consumables = fs * (i.consumables_percent / 100);
+  var food_waste = fs * (i.food_waste_percent / 100);
+  var fuel = fs * (i.fuel_percent / 100);
+  var electricity = fs * (i.electricity_percent / 100);
+  var water = fs * (i.water_percent / 100);
+  var fcost = i.food_cost;
+  var tr = i.transport_cost_per_km * i.transport_kms;
+  var gas = i.on_site_gas_cost;
+  var adm = fs * (i.admin_percent / 100);
+  var com = fs * (i.commission_percent / 100);
+  var cpx = i.num_sites > 0 ? i.capex_amount / i.num_sites : 0;
+  var tc = wm + consumables + food_waste + fuel + electricity + water + fcost + tr + gas + adm + com + cpx;
+  var npl = fs - tc + i.procurement_discount;
+  var np = fs !== 0 ? (npl / fs) * 100 : 0;
+  var ac = i.aggregator_commission;
+  var fpl = npl - ac;
+  var fp = fs !== 0 ? (fpl / fs) * 100 : 0;
+  return {
+    food_sales:fs, wages_manpower:wm, consumables:consumables, food_waste:food_waste,
+    fuel:fuel, electricity:electricity, water:water, food_cost:fcost,
+    transportation:tr, on_site_gas:gas, administrative:adm,
+    capex_per_site:cpx, commission:com, total_cost:tc, procurement_discount:i.procurement_discount,
+    net_profit_loss:npl, net_profit_loss_pct:np, aggregator_commission_total:ac,
+    final_profit_loss:fpl, final_profit_loss_pct:fp
+  };
+}
+
+function fmt(v){return Math.abs(v).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function fmtPct(v){return(v>=0?'+':'')+v.toFixed(1)+'%';}
+function money(v,isPct){return isPct?fmtPct(v):('\u20B9'+fmt(v));}
+function profitCls(v,isPct){return isPct?(v>=0?'text-emerald-600 font-semibold':'text-red-600 font-semibold'):(v>=0?'text-emerald-700 font-bold':'text-red-700 font-bold');}
+
+function get(siteId,key){
+  var c = computeDerived(gridState[siteId]);
+  var map = {
+    _food_sales:'food_sales',_wages:'wages_manpower',
+    _consumables:'consumables',_food_waste:'food_waste',_fuel:'fuel',
+    _electricity:'electricity',_water:'water',_food_cost:'food_cost',
+    _transportation:'transportation',
+    _gas:'on_site_gas',_admin:'administrative',_capex:'capex_per_site',
+    _commission_calc:'commission',_total_cost:'total_cost',
+    _net_profit:'net_profit_loss',_net_pct:'net_profit_loss_pct',
+    _agg_comm:'aggregator_commission_total',_final_profit:'final_profit_loss',_final_pct:'final_profit_loss_pct'
+  };
+  return typeof map[key] !== 'undefined' ? c[map[key]] : gridState[siteId][key];
+}
+
+function buildHead(prefix, extraTh){
+  var ths = SITES.map(function(s){
+    return '<th class="sticky-top-th min-w-[120px] border-b border-r border-slate-200 p-2 text-center bg-slate-50"><div class="font-bold text-slate-700 whitespace-nowrap text-xs">'+s.name+'</div></th>';
+  }).join('');
+  return '<tr>'+
+    '<th class="sticky-head bg-slate-50 border-b border-r border-slate-300 p-3 w-[230px] text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Field Name</th>'+
+    ths+(extraTh||'')+
+    '<th class="sticky-top-right-th bg-slate-100 border-b border-l border-slate-300 min-w-[110px] text-center p-2 font-bold text-slate-700 shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.05)]">AVG</th>'+
+  '</tr>';
+}
+
+function renderInputBody(){
+  var html = [];
+  for (var ri = 0; ri < INPUT_ROWS.length; ri++) {
+    var r = INPUT_ROWS[ri];
+    if (r.type === 'header') {
+      html.push('<tr><td colspan="'+(SITES.length+2)+'" class="py-2 px-4 font-bold border-y border-slate-200 text-xs uppercase tracking-wider sticky-left '+r.sectionClass+'">'+r.section+'</td></tr>');
+      continue;
+    }
+    var isCalc = r.type === 'calc' || r.type === 'total' || r.type === 'profit' || r.type === 'pct';
+    var cells = '';
+    for (var si = 0; si < SITES.length; si++) {
+      var s = SITES[si];
+      if (isCalc) {
+        var val = get(s.id, r.key);
+        var isPct = String(r.key).indexOf('_pct') >= 0;
+        var cls = r.type === 'total' ? 'font-mono text-sm font-bold text-amber-900'
+          : profitCls(val, isPct);
+        cells += '<td class="border-b border-r border-slate-200 py-2 px-2 text-center '+cls+'">'+money(val,isPct)+'</td>';
+      } else {
+        cells += '<td class="border-b border-r border-slate-200 py-1 px-1 text-center bg-white group-hover:bg-blue-50/30">'+
+          '<input type="number" step="'+(r.step||'any')+'" class="cell-input" data-site="'+s.id+'" data-key="'+r.key+'" value="'+(gridState[s.id][r.key]||0)+'"></td>';
+      }
+    }
+    var avgHtml = '';
+    if (isCalc) {
+      var vals = []; var sum = 0;
+      for (var vi = 0; vi < SITES.length; vi++) { var v = get(SITES[vi].id, r.key); vals.push(v); sum += v; }
+      var avg = sum / vals.length;
+      var isPct = String(r.key).indexOf('_pct') >= 0;
+      avgHtml = '<td class="sticky right-0 z-30 border-b border-l border-slate-200 py-2 px-2 text-center font-mono text-xs font-semibold text-slate-500 bg-slate-50 shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.05)]">'+money(avg,isPct)+'</td>';
+    } else {
+      avgHtml = '<td class="sticky right-0 z-30 border-b border-l border-slate-200 py-1 px-1 text-center bg-slate-50 shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.05)]"><span class="text-xs text-slate-400">&mdash;</span></td>';
+    }
+    var lblCls = r.type === 'calc' ? 'italic text-slate-500' : 'text-slate-700 font-medium';
+    var indent = r.label.indexOf('\u21B3') === 0 ? 'pl-4' : '';
+    html.push('<tr class="group hover:bg-blue-50/20">'+
+      '<td class="sticky-left border-b border-slate-200 py-2 px-3 '+lblCls+' text-xs '+indent+' bg-white group-hover:bg-blue-50/20">'+r.label+'</td>'+cells+avgHtml+'</tr>');
+  }
+  document.getElementById('inputBody').innerHTML = html.join('');
+  var inputs = document.querySelectorAll('#inputBody input.cell-input');
+  for (var ii = 0; ii < inputs.length; ii++) {
+    inputs[ii].addEventListener('input', function(){
+      gridState[this.dataset.site][this.dataset.key] = parseFloat(this.value) || 0;
+      refreshCalculatedCells();
+    });
+  }
+}
+
+function refreshCalculatedCells(){
+  var rows = document.querySelectorAll('#inputBody tr');
+  for (var ii = 0; ii < INPUT_ROWS.length; ii++) {
+    var r = INPUT_ROWS[ii];
+    if (r.type === 'header') continue;
+    if (!(r.type==='calc'||r.type==='total'||r.type==='profit'||r.type==='pct')) continue;
+    var tr = rows[ii]; if (!tr) continue;
+    var tds = tr.querySelectorAll('td');
+    for (var si = 0; si < SITES.length; si++) {
+      var td = tds[si+1]; if (!td) continue;
+      var val = get(SITES[si].id, r.key);
+      var isPct = String(r.key).indexOf('_pct') >= 0;
+      td.className = 'border-b border-r border-slate-200 py-2 px-2 text-center '+
+        (r.type==='total'?'font-mono text-sm font-bold text-amber-900':profitCls(val,isPct))+
+        ' bg-white group-hover:bg-blue-50/20';
+      td.innerHTML = money(val, isPct);
+    }
+    var avgTd = tds[SITES.length+1]; if (avgTd) {
+      var vals=[],sum=0;
+      for(var vi=0;vi<SITES.length;vi++){vals.push(get(SITES[vi].id,r.key));sum+=vals[vi];}
+      var avg=sum/vals.length, isPct=String(r.key).indexOf('_pct')>=0;
+      avgTd.innerHTML=money(avg,isPct);
+    }
+  }
+}
+
+function renderPNLBody(){
+  var html = [];
+  for (var ri = 0; ri < PNL_ROWS.length; ri++) {
+    var r = PNL_ROWS[ri];
+    if (r.type === 'header') {
+      html.push('<tr><td colspan="'+(SITES.length+2)+'" class="py-2 px-4 font-bold border-y border-slate-200 text-xs uppercase tracking-wider sticky-left '+r.sectionClass+'">'+r.section+'</td></tr>');
+      continue;
+    }
+    var cells = '';
+    for (var si = 0; si < SITES.length; si++) {
+      var s = SITES[si];
+      var c = computeDerived(gridState[s.id]);
+      var val = c[r.key];
+      var cls;
+      if (r.highlight === 'amber') cls = 'font-mono text-sm font-bold text-amber-900';
+      else if (r.isProfit) cls = profitCls(val, r.isPct || false);
+      else cls = 'font-mono text-sm font-semibold text-gray-700';
+      cells += '<td class="border-b border-r border-slate-200 py-2 px-2 text-center '+cls+'">'+money(val,!!r.isPct)+'</td>';
+    }
+    var totalVal = 0;
+    for (var si = 0; si < SITES.length; si++) totalVal += computeDerived(gridState[SITES[si].id])[r.key];
+    var avgVal = r.isPct ? totalVal / SITES.length : totalVal;
+    var totalCls = r.isProfit ? profitCls(avgVal, r.isPct || false)
+      : r.highlight === 'amber' ? 'font-mono text-sm font-bold text-amber-900' : 'font-mono text-sm font-bold text-slate-600';
+    html.push('<tr class="hover:bg-slate-50/50">'+
+      '<td class="sticky-left border-b border-slate-200 py-2 px-3 text-xs font-medium text-slate-700 bg-white">'+r.label+'</td>'+
+      cells+
+      '<td class="sticky right-0 z-30 border-b border-l border-slate-200 py-2 px-2 text-center font-mono text-xs font-semibold bg-slate-50 shadow-[-4px_0_4px_-2px_rgba(0,0,0,0.05)] '+totalCls+'">'+money(avgVal,!!r.isPct)+'</td></tr>');
+  }
+  document.getElementById('pnlBody').innerHTML = html.join('');
+}
+
+function switchTab(tab){
+  document.getElementById('view-inputs').style.display = tab === 'inputs' ? '' : 'none';
+  document.getElementById('view-pnl').style.display = tab === 'pnl' ? '' : 'none';
+  document.getElementById('tab-inputs').className = tab === 'inputs'
+    ? 'pb-4 text-sm font-bold uppercase tracking-wide transition-all border-b-4 border-[#2E8F45] text-[#2E8F45]'
+    : 'pb-4 text-sm font-bold uppercase tracking-wide transition-all border-b-4 border-transparent text-gray-400 hover:text-gray-600';
+  document.getElementById('tab-pnl').className = tab === 'pnl'
+    ? 'pb-4 text-sm font-bold uppercase tracking-wide transition-all border-b-4 border-[#2E8F45] text-[#2E8F45]'
+    : 'pb-4 text-sm font-bold uppercase tracking-wide transition-all border-b-4 border-transparent text-gray-400 hover:text-gray-600';
+  document.getElementById('breadcrumbTab').textContent = tab === 'inputs' ? 'Input Fields' : 'Site-wise P&L';
+  if (tab === 'pnl') renderPNLBody();
+}
+
+function filterSites(q){
+  var query = q.toLowerCase().trim();
+  if (!query) { SITES = ALL_SITES.slice(); }
+  else {
+    SITES = ALL_SITES.filter(function(s){ return s.name.toLowerCase().indexOf(query) >= 0; });
+  }
+  gridState = {};
+  for (var i = 0; i < SITES.length; i++) gridState[SITES[i].id] = Object.assign({}, DEFAULTS);
+  applyDemoData();
+  document.getElementById('inputHead').innerHTML = buildHead();
+  document.getElementById('pnlHead').innerHTML = buildHead();
+  renderInputBody();
+  renderPNLBody();
+  document.getElementById('siteCount').textContent = SITES.length + ' sites';
+  document.getElementById('pnlSiteCount').textContent = SITES.length + ' sites';
+}
+
+function applyDemoData(){
+  var bR=[120,150,100,180,130,140,110,160,135,145,125,125,170,155,115,165,175,190,105,185,195,200,95,210];
+  var bP=[300,400,250,350,280,320,270,380,310,330,330,290,360,340,260,370,390,410,240,400,420,430,220,450];
+  var bM=[5,8,3,6,4,7,4,9,5,6,5,5,10,6,3,8,9,11,4,12,7,13,14,2,15];
+  var bRt=[800,900,750,850,820,880,780,920,840,860,830,950,870,760,890,910,970,740,930,940,990,710,980];
+  var bTk=[18,22,15,20,17,19,16,21,18.5,19.5,17.5,23,20.5,12,19,21,24,25,14,26,27,28,11,29];
+  var bGas=[2000,3500,1200,2800,2200,3000,1800,3200,2500,2700,2400,3800,2900,1500,3100,3300,4000,1900,3900,4100,4200,1700,4300];
+  var bCx=[50000,80000,30000,60000,45000,70000,40000,90000,55000,65000,55000,100000,75000,35000,85000,95000,110000,45000,105000,115000,120000,40000,125000];
+  var bComm=[5,5,5,4,5,4,5,5,6,5,5,5,4,6,6,5,5,5,6,4,5,6,4,6,5,4,6];
+  var bDisc=[500,1000,200,800,600,900,400,1200,700,900,700,1500,1000,300,1100,1300,1400,1600,500,1500,1600,1700,400,1800];
+  var bAgg=[0,2000,0,1500,500,1000,0,2500,800,1200,600,3000,1000,0,1800,2200,0,1000,2000,500,0,2500,0];
+  var bFcR=[32,35,30,33,31,34,36,30,32,33,31,35,34,30,32,33,36,31,34,35,37,30,38];
+  for (var idx = 0; idx < SITES.length; idx++) {
+    var v = function(){ return 0.7 + Math.random() * 0.6; };
+    var rev = Math.round(bR[idx] * v());
+    var pks = Math.round(bP[idx] * v());
+    gridState[SITES[idx].id] = {
+      revenue_per_plate: rev,
+      packs_per_day: pks,
+      manpower_count: Math.max(1, Math.round(bM[idx] * v())),
+      rate_per_manpower: Math.round(bRt[idx] * v()),
+      manpower_days: 30,
+      num_sites: idx % 3 === 0 ? 3 : idx % 5 === 0 ? 5 : 1,
+      transport_cost_per_km: Math.round(bTk[idx] * v()),
+      transport_kms: Math.round(bTk[idx] * 1.5 * v()),
+      on_site_gas_cost: Math.round(bGas[idx] * v()),
+      admin_percent: 0.3,
+      capex_amount: Math.round(bCx[idx] * v()),
+      commission_percent: bComm[idx],
+      procurement_discount: Math.round(bDisc[idx] * v()),
+      aggregator_commission: Math.round(bAgg[idx] * v()),
+      consumables_percent: 0.10,
+      food_waste_percent: 1.0,
+      fuel_percent: 4.0,
+      electricity_percent: 0.34,
+      water_percent: 0.34,
+      food_cost: Math.round(rev * pks * (bFcR[idx] / 100) * v())
+    };
+  }
+}
+
+// ---- Build app HTML ----
+var appHTML =
+  '<div class="flex flex-col h-full bg-[#FAF7F3]">'+
+  '<div class="flex-none bg-white border-b border-gray-200 sticky top-0 z-30 px-6 py-4 shadow-sm">'+
+    '<div class="flex flex-col md:flex-row md:items-center justify-between gap-4">'+
+      '<div>'+
+        '<h2 class="text-xl font-bold text-gray-800">Finances</h2>'+
+        '<div class="flex items-center gap-2 text-xs text-gray-500 mt-1"><span>Home</span><span>/</span>'+
+        '<span class="font-semibold text-green-700 capitalize" id="breadcrumbTab">Input Fields</span></div>'+
+      '</div>'+
+      '<div class="flex items-center gap-3">'+
+        '<div class="relative">'+
+          '<i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4"></i>'+
+          '<input type="text" id="siteSearch" placeholder="Search sites..." oninput="filterSites(this.value)"'+
+            'class="pl-9 pr-4 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 w-56">'+
+        '</div>'+
+        '<button onclick="alert(\'Save All clicked!\')"'+
+          'class="flex items-center gap-2 px-4 py-2 bg-[#2E8F45] hover:bg-green-700 text-white rounded-lg text-sm font-medium shadow-sm transition-colors">'+
+          '<i data-lucide="save" class="w-4 h-4"></i> Save All</button>'+
+      '</div>'+
+    '</div>'+
+    '<div class="flex gap-8 mt-5 -mb-4">'+
+      '<button onclick="switchTab(\'inputs\')" id="tab-inputs"'+
+        'class="pb-4 text-sm font-bold uppercase tracking-wide transition-all border-b-4 border-[#2E8F45] text-[#2E8F45]">Input Fields</button>'+
+      '<button onclick="switchTab(\'pnl\')" id="tab-pnl"'+
+        'class="pb-4 text-sm font-bold uppercase tracking-wide transition-all border-b-4 border-transparent text-gray-400 hover:text-gray-600">Site-wise P&L</button>'+
+    '</div>'+
+  '</div>'+
+
+  '<div class="flex-1 overflow-auto p-6 md:p-8"><div class="max-w-full mx-auto">'+
+
+  // TAB 1
+  '<div id="view-inputs">'+
+    '<div class="flex flex-col h-full bg-white shadow-sm border border-slate-200 rounded-lg overflow-hidden">'+
+      '<div class="p-3 border-b border-slate-200 flex justify-between items-center bg-white sticky left-0 z-50">'+
+        '<span class="text-xs text-slate-500 italic">Hold Shift + Scroll to scroll horizontally &bull; Edit any cell to see live calculations</span>'+
+        '<span class="text-xs text-slate-400" id="siteCount"></span>'+
+      '</div>'+
+      '<div class="flex-1 overflow-auto custom-scrollbar">'+
+        '<table class="border-collapse w-full min-w-max text-sm" id="inputTable">'+
+          '<thead id="inputHead"></thead>'+
+          '<tbody id="inputBody"></tbody>'+
+        '</table>'+
+      '</div>'+
+    '</div>'+
+  '</div>'+
+
+  // TAB 2
+  '<div id="view-pnl" style="display:none">'+
+    '<div class="flex flex-col h-full bg-white shadow-sm border border-slate-200 rounded-lg overflow-hidden">'+
+      '<div class="p-3 border-b border-slate-200 flex justify-between items-center bg-white sticky left-0 z-50">'+
+        '<span class="text-xs text-slate-500 italic">Read-only &mdash; auto-calculated from inputs</span>'+
+        '<span class="text-xs text-slate-400" id="pnlSiteCount"></span>'+
+      '</div>'+
+      '<div class="flex-1 overflow-auto custom-scrollbar">'+
+        '<table class="border-collapse w-full min-w-max text-sm" id="pnlTable">'+
+          '<thead id="pnlHead"></thead>'+
+          '<tbody id="pnlBody"></tbody>'+
+        '</table>'+
+      '</div>'+
+    '</div>'+
+  '</div>'+
+
+  '</div></div></div>';
+
+document.getElementById('app').innerHTML = appHTML;
+
+// ---- Init with error handling ----
+try {
+  lucide.createIcons();
+  document.getElementById('inputHead').innerHTML = buildHead();
+  document.getElementById('pnlHead').innerHTML = buildHead();
+  document.getElementById('siteCount').textContent = SITES.length + ' sites';
+  document.getElementById('pnlSiteCount').textContent = SITES.length + ' sites';
+  applyDemoData();
+  renderInputBody();
+  renderPNLBody();
+} catch(e) {
+  document.getElementById('errDisplay').textContent = e.message;
+  document.getElementById('errDisplay').style.display = 'block';
+  console.error('Init error:', e);
+}
+</script>
+</body>
+</html>
